@@ -1,0 +1,13 @@
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  namespace: istio-system
+  name: example-istiocontrolplane
+spec:
+  profile: default
+  values:
+    global:
+      meshID: mesh1
+      multiCluster:
+        clusterName: cluster1
+      network: network1

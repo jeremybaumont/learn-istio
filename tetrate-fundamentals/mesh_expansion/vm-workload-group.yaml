@@ -1,0 +1,12 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: WorkloadGroup
+metadata:
+  name: "sp-ref-smoke-provider"
+  namespace: "sp-ref-smoke-provider"
+spec:
+  metadata:
+    labels:
+      app: "sp-ref-smoke-provider"
+  template:
+    serviceAccount: "sp-ref-smoke-provider"
+    network: "sp-ref-smoke-provider"

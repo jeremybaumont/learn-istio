@@ -1,0 +1,18 @@
+defaultConfig:
+  discoveryAddress: istiod.istio-system.svc:15012
+  meshId: mesh1
+  proxyMetadata:
+    CANONICAL_REVISION: latest
+    CANONICAL_SERVICE: sp-ref-smoke-provider
+    ISTIO_META_CLUSTER_ID: cluster1
+    ISTIO_META_DNS_CAPTURE: "true"
+    ISTIO_META_MESH_ID: mesh1
+    ISTIO_META_NETWORK: sp-ref-smoke-provider
+    ISTIO_META_WORKLOAD_NAME: sp-ref-smoke-provider
+    ISTIO_METAJSON_LABELS: '{"app":"sp-ref-smoke-provider","service.istio.io/canonical-name":"sp-ref-smoke-provider","service.istio.io/canonical-version":"latest"}'
+    POD_NAMESPACE: sp-ref-smoke-provider
+    SERVICE_ACCOUNT: sp-ref-smoke-provider
+    TRUST_DOMAIN: cluster.local
+  tracing:
+    zipkin:
+      address: zipkin.istio-system:9411
