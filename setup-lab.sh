@@ -17,6 +17,14 @@ echo "Checking kubernetes pods status..."
 sleep 10 
 kubectl get pods -n kube-system
 
+echo "Installing metallb..."
+kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.10.2/manifests/namespace.yaml
+kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.10.2/manifests/metallb.yaml
+
+echo "Checking kubernetes pods status..."
+sleep  5 
+kubectl get pods -n kube-system
+
 echo "Initialising istio operator..."
 istioctl operator init
 
@@ -35,3 +43,5 @@ kubectl apply -f shpod.yaml
 kubectl label namespace shpod istio-injection=enabled
 kubectl delete po shpod -n shpod
 kubectl apply -f shpod.yaml
+
+
