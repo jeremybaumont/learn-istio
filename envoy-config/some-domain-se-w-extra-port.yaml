@@ -1,0 +1,17 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: http-server
+spec:
+  hosts:
+  - some.domain.com
+  ports:
+  - number: 443
+    name: https
+    protocol: https
+  - number: 80
+    name: http
+    protocol: http
+  resolution: STATIC
+  endpoints:
+  - address: 2.2.2.2

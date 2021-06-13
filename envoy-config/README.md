@@ -2,7 +2,7 @@
 
 In this directory, we the same approach than [Istio: Up and Running](https://learning.oreilly.com/library/view/istio-up-and) to show some Istio configuration and the Envoy configuration it results in, highlight the main similarities, and outline how other changes to the same Istio configuration will manifest in Envoy so that we can test and see for ourself and use this knowledge to diagnose and solve the majority of Istio issues that we’ll come across. contains some manifests of istio objects and explain which envoy configuration is generated.
 
-
+## Ingress gateway
 On the istio-ingressgateway pod the listeners and clusters looks like the following:
 ```
 ~/code/learn/istio/envoy-config > ipc listeners $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system
@@ -109,6 +109,8 @@ BlackHoleCluster                                        -         -          -  
 agent                                                   -         -          -             STATIC
 ```
 
+## Gateway
+
 When we apply the following gateway `foo-com-gateway`
 ```
 apiVersion: networking.istio.io/v1alpha3
@@ -126,6 +128,8 @@ spec:
       name: http
       protocol: HTTP
 ```
+
+### Physical Listener - Basic HTTP Port
 
 It creates a physical listener on the istio-ingressgateway istio-proxy pod container on port 8080 and a route named `http.80`:
 ```
@@ -397,6 +401,8 @@ date: Sat, 12 Jun 2021 03:48:30 GMT
 server: istio-envoy
 ```
 
+### Physical Listener - TLS Termination
+
 Let's setup a TLS termination on the `foo-com-gateway`:
 ```
 apiVersion: networking.istio.io/v1beta1
@@ -638,6 +644,8 @@ The route `https.443.https.foo-com-gateway.default` is the same way than for the
     name: blackhole:443
 ```
 
+## Virtual Service
+
 Let's bind a Virtual Service to this Gateway.
 ```
 apiVersion: networking.istio.io/v1alpha3
@@ -655,9 +663,12 @@ spec:
        host: bar.foo.svc.cluster.local
 ```
 
+### Routes
+
 No change occurred in the physical listeners `0.0.0.0_80` and `0.0.0.0_8443`. For HTTP, all of the action happens in routes. Other protocols for example, TCP push more of the logic to the listener.
+The route `http.80` is configured on the `bar.foo.com` and `bar.foo.com:*` domains with the default route prefix `/` catching all requests and forward them to the cluster `outbound|80||bar.foo.svc.cluster.local`
 ```
-~/code/learn/istio/envoy-config > ipc routes $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system --name http.80 -o json              λ:main  [   ]
+~/code/learn/istio/envoy-config > ipc routes $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system --name http.80 -o json      
 
 [
     {
@@ -710,4 +721,342 @@ No change occurred in the physical listeners `0.0.0.0_80` and `0.0.0.0_8443`. Fo
         "validateClusters": false
     }
 ]
-`
+```
+
+Note that the route `https.443.https.foo-com-gateway.default` is also modified cause the Virtual Service is linked to the `foo-com-gateway` gateway.
+
+```
+
+~/code/learn/istio/envoy-config > ipc routes $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system --name https.443.https.foo-com-gateway.default -o yaml
+
+- name: https.443.https.foo-com-gateway.default
+  validateClusters: false
+  virtualHosts:
+  - domains:
+    - bar.foo.com
+    - bar.foo.com:*
+    includeRequestAttemptCount: true
+    name: bar.foo.com:443
+    routes:
+    - decorator:
+        operation: bar.foo.svc.cluster.local:443/*
+      match:
+        prefix: /
+      metadata:
+        filterMetadata:
+          istio:
+            config: /apis/networking.istio.io/v1alpha3/namespaces/default/virtual-service/foo-default
+      route:
+        cluster: outbound|443||bar.foo.svc.cluster.local
+        maxGrpcTimeout: 0s
+        retryPolicy:
+          hostSelectionRetryMaxAttempts: "5"
+          numRetries: 2
+          retriableStatusCodes:
+          - 503
+          retryHostPredicate:
+          - name: envoy.retry_host_predicates.previous_hosts
+          retryOn: connect-failure,refused-stream,unavailable,cancelled,retriable-status-codes
+        timeout: 0s
+
+
+```
+
+We can add retries, split traffic among several destinations, inject faults... All this options of a VirtualService will manifest as routes in envoy configuration.
+
+## ServiceEntry
+
+Istio generates an envoy cluster for each kubernetes service and port in the mesh. We can create a ServiceEntry to see a new cluster appear in Envoy configuration.
+For example if we look at the current cluster on the pod shpod:
+
+```
+~/code/learn/istio/envoy-config > ipc clusters shpod -n shpod
+
+SERVICE FQDN                                            PORT      SUBSET     DIRECTION     TYPE             DESTINATION RULE
+BlackHoleCluster                                        -         -          -             STATIC
+InboundPassthroughClusterIpv4                           -         -          -             ORIGINAL_DST
+InboundPassthroughClusterIpv6                           -         -          -             ORIGINAL_DST
+PassthroughCluster                                      -         -          -             ORIGINAL_DST
+agent                                                   -         -          -             STATIC
+istio-egressgateway.istio-system.svc.cluster.local      80        -          outbound      EDS
+istio-egressgateway.istio-system.svc.cluster.local      443       -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     80        -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     443       -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     15021     -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     15443     -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     31400     -          outbound      EDS
+istio-operator.istio-operator.svc.cluster.local         8383      -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   443       -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15010     -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15012     -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15014     -          outbound      EDS
+kube-dns.kube-system.svc.cluster.local                  53        -          outbound      EDS
+kube-dns.kube-system.svc.cluster.local                  9153      -          outbound      EDS
+kubernetes.default.svc.cluster.local                    443       -          outbound      EDS
+prometheus_stats                                        -         -          -             STATIC
+sds-grpc                                                -         -          -             STATIC
+xds-grpc                                                -         -          -             STATIC
+zipkin                                                  -         -          -             STRICT_DNS
+```
+
+If we apply the following ServiceEntry:
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: http-server
+spec:
+  hosts:
+  - some.domain.com
+  ports:
+  - number: 80
+    name: http
+    protocol: http
+  resolution: STATIC
+  endpoints:
+  - address: 2.2.2.2
+```
+
+### Cluster
+
+An outbound cluster `outbound|80||some.domain.com` is created on every istio-proxy:
+```
+
+~/code/learn/istio/envoy-config > ipc clusters shpod -n shpod                                    λ:main  [  ]
+SERVICE FQDN                                            PORT      SUBSET     DIRECTION     TYPE             DESTINATION RULE
+BlackHoleCluster                                        -         -          -             STATIC
+InboundPassthroughClusterIpv4                           -         -          -             ORIGINAL_DST
+InboundPassthroughClusterIpv6                           -         -          -             ORIGINAL_DST
+PassthroughCluster                                      -         -          -             ORIGINAL_DST
+agent                                                   -         -          -             STATIC
+istio-egressgateway.istio-system.svc.cluster.local      80        -          outbound      EDS
+istio-egressgateway.istio-system.svc.cluster.local      443       -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     80        -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     443       -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     15021     -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     15443     -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     31400     -          outbound      EDS
+istio-operator.istio-operator.svc.cluster.local         8383      -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   443       -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15010     -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15012     -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15014     -          outbound      EDS
+kube-dns.kube-system.svc.cluster.local                  53        -          outbound      EDS
+kube-dns.kube-system.svc.cluster.local                  9153      -          outbound      EDS
+kubernetes.default.svc.cluster.local                    443       -          outbound      EDS
+prometheus_stats                                        -         -          -             STATIC
+sds-grpc                                                -         -          -             STATIC
+some.domain.com                                         80        -          outbound      EDS
+xds-grpc                                                -         -          -             STATIC
+zipkin                                                  -         -          -             STRICT_DNS
+
+~/code/learn/istio/envoy-config > ipc clusters $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system
+
+SERVICE FQDN                                            PORT      SUBSET     DIRECTION     TYPE           DESTINATION RULE
+BlackHoleCluster                                        -         -          -             STATIC
+agent                                                   -         -          -             STATIC
+istio-egressgateway.istio-system.svc.cluster.local      80        -          outbound      EDS
+istio-egressgateway.istio-system.svc.cluster.local      443       -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     80        -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     443       -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     15021     -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     15443     -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     31400     -          outbound      EDS
+istio-operator.istio-operator.svc.cluster.local         8383      -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   443       -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15010     -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15012     -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15014     -          outbound      EDS
+kube-dns.kube-system.svc.cluster.local                  53        -          outbound      EDS
+kube-dns.kube-system.svc.cluster.local                  9153      -          outbound      EDS
+kubernetes.default.svc.cluster.local                    443       -          outbound      EDS
+prometheus_stats                                        -         -          -             STATIC
+sds-grpc                                                -         -          -             STATIC
+some.domain.com                                         80        -          outbound      EDS
+xds-grpc                                                -         -          -             STATIC
+zipkin                                                  -         -          -             STRICT_DNS
+
+~/code/learn/istio/envoy-config > ipc clusters shpod -n shpod --fqdn some.domain.com -o json     λ:main  [  ]
+[
+    {
+        "name": "outbound|80||some.domain.com",
+        "type": "EDS",
+        "edsClusterConfig": {
+            "edsConfig": {
+                "ads": {},
+                "initialFetchTimeout": "0s",
+                "resourceApiVersion": "V3"
+            },
+            "serviceName": "outbound|80||some.domain.com"
+        }
+        "connectTimeout": "10s",
+        "circuitBreakers": {
+            "thresholds": [
+                {
+                    "maxConnections": 4294967295,
+                    "maxPendingRequests": 4294967295,
+                    "maxRequests": 4294967295,
+                    "maxRetries": 4294967295,
+                    "trackRemaining": true
+                }
+            ]
+        },
+        "metadata": {
+            "filterMetadata": {
+                "istio": {
+                    "default_original_port": 80,
+                    "services": [
+                        {
+                            "host": "some.domain.com",
+                            "name": "some.domain.com",
+                            "namespace": "default"
+                        }
+                    ]
+                }
+            }
+        },
+        "filters": [
+            {
+                "name": "istio.metadata_exchange",
+                "typedConfig": {
+                    "@type": "type.googleapis.com/udpa.type.v1.TypedStruct",
+                    "typeUrl": "type.googleapis.com/envoy.tcp.metadataexchange.config.MetadataExchange",
+                    "value": {
+                        "protocol": "istio-peer-exchange"
+                    }
+                }
+            }
+        ]
+    }
+]
+```
+
+
+It create also the respective envoy endpoints:
+```
+~/code/learn/istio/envoy-config > ipc endpoints $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system --cluster 'outbound|80||some.domain.com' -o json
+
+
+[
+    {
+        "name": "outbound|80||some.domain.com",
+        "addedViaApi": true,
+        "hostStatuses": [
+            {
+                "address": {
+                    "socketAddress": {
+                        "address": "2.2.2.2",
+                        "portValue": 80
+                    }
+                },
+                "stats": [
+                    {
+                        "name": "cx_connect_fail"
+                    },
+                    {
+                        "name": "cx_total"
+                    },
+                    {
+                        "name": "rq_error"
+                    },
+                    {
+                        "name": "rq_success"
+                    },
+                    {
+                        "name": "rq_timeout"
+                    },
+                    {
+                        "name": "rq_total"
+                    },
+                    {
+                        "type": "GAUGE",
+                        "name": "cx_active"
+                    },
+                    {
+                        "type": "GAUGE",
+                        "name": "rq_active"
+                    }
+                ],
+                "healthStatus": {
+                    "edsHealthStatus": "HEALTHY"
+                },
+                "weight": 1,
+                "locality": {}
+            }
+        ],
+        "circuitBreakers": {
+            "thresholds": [
+                {
+                    "maxConnections": 4294967295,
+                    "maxPendingRequests": 4294967295,
+                    "maxRequests": 4294967295,
+                    "maxRetries": 4294967295
+                },
+                {
+                    "priority": "HIGH",
+                    "maxConnections": 1024,
+                    "maxPendingRequests": 1024,
+                    "maxRequests": 1024,
+                    "maxRetries": 3
+                }
+            ]
+        },
+        "observabilityName": "outbound|80||some.domain.com"
+    }
+]
+```
+
+If we add an extra port in the ServiceEntry like following:
+```
+
+~/code/learn/istio/envoy-config > cat some-domain-se-w-extra-port.yaml                                                                                                                              λ:main  [   ]
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: http-server
+spec:
+  hosts:
+  - some.domain.com
+  ports:
+  - number: 443
+    name: https
+    protocol: https
+  - number: 80
+    name: http
+    protocol: http
+  resolution: STATIC
+  endpoints:
+  - address: 2.2.2.2
+```
+
+It will create another envoy cluster:
+```
+
+~/code/learn/istio/envoy-config > ipc clusters $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system                                   λ:main  [   ]
+
+SERVICE FQDN                                            PORT      SUBSET     DIRECTION     TYPE           DESTINATION RULE
+BlackHoleCluster                                        -         -          -             STATIC
+agent                                                   -         -          -             STATIC
+istio-egressgateway.istio-system.svc.cluster.local      80        -          outbound      EDS
+istio-egressgateway.istio-system.svc.cluster.local      443       -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     80        -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     443       -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     15021     -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     15443     -          outbound      EDS
+istio-ingressgateway.istio-system.svc.cluster.local     31400     -          outbound      EDS
+istio-operator.istio-operator.svc.cluster.local         8383      -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   443       -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15010     -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15012     -          outbound      EDS
+istiod.istio-system.svc.cluster.local                   15014     -          outbound      EDS
+kube-dns.kube-system.svc.cluster.local                  53        -          outbound      EDS
+kube-dns.kube-system.svc.cluster.local                  9153      -          outbound      EDS
+kubernetes.default.svc.cluster.local                    443       -          outbound      EDS
+prometheus_stats                                        -         -          -             STATIC
+sds-grpc                                                -         -          -             STATIC
+some.domain.com                                         80        -          outbound      EDS
+some.domain.com                                         443       -          outbound      EDS
+xds-grpc                                                -         -          -             STATIC
+zipkin                                                  -         -          -             STRICT_DNS
+```

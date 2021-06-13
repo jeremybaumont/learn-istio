@@ -19,6 +19,4 @@ spec:
     hosts:
     - "*.foo.com"
     tls:
-      mode: SIMPLE
-      serverCertificate: /etc/certs/server.pem
-      privateKey: /etc/certs/privatekey.pem
+      mode: ISTIO_MUTUAL 
