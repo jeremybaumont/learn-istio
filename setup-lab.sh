@@ -13,35 +13,31 @@ kind create cluster --name istio-lab --config kind-istio-lab.yaml
 echo "Setting cluster info context..."
 kubectl cluster-info --context kind-istio-lab
 
-echo "Checking kubernetes pods status..."
-sleep 10 
-kubectl get pods -n kube-system
-
-echo "Installing metallb..."
-kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.10.2/manifests/namespace.yaml
-kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.10.2/manifests/metallb.yaml
-
-echo "Checking kubernetes pods status..."
-sleep  5 
-kubectl get pods -n kube-system
+for pod in $(kubectl get pods -n kube-system -o jsonpath='{.items[0].metadata.name}'); do
+    while [[ $(kubectl get pods $pod -n kube-system -o 'jsonpath={..status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do 
+        sleep 3
+        echo "Waiting for $pod to be ready."
+    done
+done
 
 echo "Initialising istio operator..."
 istioctl operator init
 
 echo "Installing istio operator"
 kubectl apply -f istio-operator.yaml
+sleep 10
 
-echo "Checking istios pods status..."
-sleep 15 
-kubectl get pods -n istio-system
+for pod in $(kubectl get pods -n istio-system -l app=istiod -o jsonpath='{.items[0].metadata.name}'); do
+    while [[ $(kubectl get pods $pod -n istio-system -o 'jsonpath={..status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do 
+        sleep 3
+        echo "Waiting for $pod to be ready."
+    done
+done
 
 echo "Enabling istio sidecar injection on default namespace..."
 kubectl label namespace default istio-injection=enabled
 
 echo "Installing shpod kubernetes objects/pods... and enabling sidecar injection on shpod namespace..."
-kubectl apply -f shpod.yaml
+kubectl apply -f shpod-namespace.yaml
 kubectl label namespace shpod istio-injection=enabled
-kubectl delete po shpod -n shpod
 kubectl apply -f shpod.yaml
-
-
