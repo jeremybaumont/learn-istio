@@ -1033,7 +1033,7 @@ spec:
 It will create another envoy cluster:
 ```
 
-~/code/learn/istio/envoy-config > ipc clusters $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system                                   λ:main  [   ]
+~/code/learn/istio/envoy-config > ipc clusters $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system      
 
 SERVICE FQDN                                            PORT      SUBSET     DIRECTION     TYPE           DESTINATION RULE
 BlackHoleCluster                                        -         -          -             STATIC
@@ -1060,3 +1060,56 @@ some.domain.com                                         443       -          out
 xds-grpc                                                -         -          -             STATIC
 zipkin                                                  -         -          -             STRICT_DNS
 ```
+
+## DestinationRule
+
+Now let's apply a `DestinationRule` object:
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: some-domain-com
+spec:
+  host: some.domain.com
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+  - name: v2
+    labels:
+      version: v2
+```
+
+### Cluster 
+
+`DestinationRule` will either create clusters or change the cluster configuration on an existing cluster. Here it will create 2 others clusters for v1 and v2:
+
+```
+ipc clusters $(kubectl -n istio-system get pod -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -n istio-system      
+[
+...
+    {
+        "name": "outbound|80||some.domain.com",
+...
+    },
+    {
+        "name": "outbound|80|v1|some.domain.com",
+...
+        "metadata": {
+            "filterMetadata": {
+                "istio": {
+                    "config": "/apis/networking/v1alpha3/namespaces/default
+                    /destination-rule/some-domain-com"
+                }
+            }
+        }
+    },
+    {
+        "name": "outbound|80|v2|some.domain.com",
+...
+    },
+...
+```
+
+
+
